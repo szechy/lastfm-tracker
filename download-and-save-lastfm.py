@@ -55,16 +55,19 @@ def main():
 	# Enable caching - important for going past 200 songs
 	network.enable_caching()
 
+	NUMBER_TRACKS = 200
 	# Retrieve last 200 tracks - or whatever strikes your fancy.
 	# Last.fm's API implements 200 track limit
-	tracks = user.get_recent_tracks(20)
+	print "Retrieving last " + str(NUMBER_TRACKS) + " tracks from Last.fm..."
+	tracks = user.get_recent_tracks(NUMBER_TRACKS)
+	print "Tracks retrieved"
 	index = 0
 	songs = []
 	for track in tracks:
 		# import into custom Track class
 		songs.append(Track(track))
 		# debugging statements commented out below
-		# uncommenting this gives the data pulled from Last.fm
+		# uncommenting statements below gives the data pulled from Last.fm
 		#print index
 		#print songs[-1].track
 		#print songs[-1].timestamp
@@ -78,21 +81,29 @@ def main():
 	db = client.music
 
 	# Retrieve highest timestamp entry from Mongo
-	most_recent = db.tracks.find().sort("_id", pymongo.ASCENDING).limit(1)[0];
-	# debugging statements commented out below:
-	#print "Mongo says..."
-	#print most_recent['timestamp']
+	# Throws an error if your Mongo collection is empty
+	try:
+		most_recent = (db.tracks.find().sort("_id", pymongo.DESCENDING)
+			.limit(1)[0]);
+	# Since your Mongo collection is empty, throw in a default value
+	except IndexError:
+		most_recent = {"timestamp": 0}
 
+	num_sent = 0
+
+	print "Inserting appropriate tracks into Mongo..."
 	# loop through songs we've retrieved, until we catch up to latest Mongo
 	for song in songs:
 		most_recent_time = song.timestamp
 		if most_recent_time > most_recent['timestamp']:
-			# Boom: now insert into Mongo
+			# Boom! Now insert into Mongo
 			while index < len(songs):
 				result = db.tracks.insert_one(songs[index].document)
 				index += 1
+				num_sent += 1
 			break
 		index += 1
+	print "Number of tracks added: " + str(num_sent)
 
 if __name__ == "__main__":
 	main()
