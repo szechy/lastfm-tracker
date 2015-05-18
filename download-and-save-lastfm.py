@@ -1,20 +1,37 @@
 import pymongo
 import pylast
-import time
 import sys
-from datetime import datetime
+import re
+import time
 
 class Track:
 	def __init__(self, playedTrack=None):
-		#self.name = playedTrack.track.name
-		#self.artist = playedTrack.track.artist
-		self.timestamp = playedTrack.timestamp
-		#self.album = playedTrack.track.get_album() 
-		#self.date = playedTrack.playback_date
+		# A Jack U song broke my previous ASCII strings implementation :(
+		# so straight to Unicode
+		self.track		= unicode(playedTrack.track.title)
+		self.artist 	= unicode(playedTrack.track.artist)
+		self.timestamp 	= str(playedTrack.timestamp)
+		self.album 		= str(playedTrack.album)
 
-	def get_timestamp(self):
-		return self.timestamp
-	#pass
+		# regex to parse the playback_date into useful data
+		matchObj 		= re.match("^(\d{1,2})\s(\w{3,4})\s(\d{4})," +
+			"\s(\d{1,2}):(\d{1,2})$", playedTrack.playback_date)
+		self.day 		= int(matchObj.group(1))
+		self.month 		= str(matchObj.group(2))
+		self.year 		= int(matchObj.group(3))
+		self.hour		= int(matchObj.group(4))
+		self.minute 	= int(matchObj.group(5))
+
+		# Create a dictionary out of the data we just created
+		# which is what pymongo's insert function accepts as input
+		self.document 	= self.toDict()
+
+	def toDict(self):
+		dict = {"track" : self.track, 			"artist" : self.artist, 
+				"timestamp": self.timestamp, 	"day" : self.day, 
+				"month" : self.month, 			"year" : self.year,
+				"hour" : self.hour, 			"minute" : self.minute}
+		return dict
 
 def main():
 	# Unique application values
@@ -38,62 +55,44 @@ def main():
 	# Enable caching - important for going past 200 songs
 	network.enable_caching()
 
-	print API_KEY
-	print API_SECRET
-	print temp_pass
+	# Retrieve last 200 tracks - or whatever strikes your fancy.
+	# Last.fm's API implements 200 track limit
+	tracks = user.get_recent_tracks(20)
+	index = 0
+	songs = []
+	for track in tracks:
+		# import into custom Track class
+		songs.append(Track(track))
+		# debugging statements commented out below
+		# uncommenting this gives the data pulled from Last.fm
+		#print index
+		#print songs[-1].track
+		#print songs[-1].timestamp
+		index += 1
 
-	# Next function only works 'properly' (returning Unix time) on Unix machines
-	# Sorry, Windows
-	current = time.time()
+	songs.reverse()
+	index = 0
 
-	# Retrieve last 200 tracks
-	tracks = user.get_recent_tracks(3)
-
-	# Connect to local MongoDB instance
+	# Connect to local MongoDB instance - replace with your own database
 	client = pymongo.MongoClient()
 	db = client.music
 
-	for track in tracks:
-		trackClass = Track(track)
-		print trackClass.timestamp
-		#print track
+	# Retrieve highest timestamp entry from Mongo
+	most_recent = db.tracks.find().sort("_id", pymongo.ASCENDING).limit(1)[0];
+	# debugging statements commented out below:
+	#print "Mongo says..."
+	#print most_recent['timestamp']
 
-	sys.exit()
-
-	result = db.tracks.insert_many(tracks)
-	print result.inserted_ids
-
-	#for track in tracks:
-		# two options to retrieve time
-		# we'll use the timestamp method, but strptime() method works
-	#	date = time.strptime(tracks[-1].playback_date, "%d %o %Y, %H:%M")
-	#	last_time = float(tracks[-1].timestamp)
-
-		# retrieve the last time from Mongo
-		# tracks.find.sort("_id", pymongo.DESCENDING).limit(1);
-
-		# put all of these tracks into MongoDB
-
-	#	print last_time
-	#	print goal
-	#	print n
-	#	print date.tm_mon
-	#	print date.tm_mday
-
-		# We haven't gone far enough back
-		#if(last_time > goal):
-		#	last_n = n
-		#	n *= 2
-		# We've gone far enough back
-		#else:
-			# need to go through tracks to find last one before goal
-		#	while last_n != n:
-		#		if tracks[last_n].timestamp > goal:
-		#			last_n += 1
-		#		else:
-		#			break
-		
-	#print last_n
+	# loop through songs we've retrieved, until we catch up to latest Mongo
+	for song in songs:
+		most_recent_time = song.timestamp
+		if most_recent_time > most_recent['timestamp']:
+			# Boom: now insert into Mongo
+			while index < len(songs):
+				result = db.tracks.insert_one(songs[index].document)
+				index += 1
+			break
+		index += 1
 
 if __name__ == "__main__":
 	main()
